@@ -1,0 +1,123 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "best script ever",
+   LoadingTitle = "testing bro",
+   LoadingSubtitle = "by PEAK8080",
+   ConfigurationSaving = {
+      Enabled = false,
+      FolderName = nil,
+      FileName = "Peak hub"
+   }
+})
+
+local MainTab = Window:CreateTab("Home", nil)
+local MainSection = MainTab:CreateSection("Main")
+
+Rayfield:Notify({
+   Title = "Executed the Script",
+   Content = "Very cool GUI",
+   Duration = 5,
+   Image = nil,
+   Actions = {
+      Ignore = {
+         Name = "Okay!",
+         Callback = function()
+            print("The user tapped Okay!")
+         end
+      }
+   },
+})
+
+local isLooping = false -- Variable to manage loop state
+
+local function startAutoFarm()
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+    local spawnPointsBox = workspace.Map.spawnPoints.Box
+    local baseParts = {}
+
+    local function updateBaseParts()
+        baseParts = {}
+        for _, child in ipairs(spawnPointsBox:GetChildren()) do
+            if child:FindFirstChild("Box") and child.Box:FindFirstChild("Base") then
+                table.insert(baseParts, child.Box.Base)
+            end
+        end
+    end
+
+    local function waitForBaseParts()
+        print("Waiting for Base parts to respawn...")
+        while #baseParts == 0 and isLooping do
+            task.wait(1)
+            updateBaseParts()
+        end
+        if #baseParts > 0 then
+            print("Base parts respawned.")
+        end
+    end
+
+    while isLooping do
+        updateBaseParts()
+
+        if #baseParts == 0 then
+            waitForBaseParts()
+        end
+
+        for _, base in ipairs(baseParts) do
+            if not isLooping then break end
+
+            humanoidRootPart.CFrame = base.CFrame
+            print("Teleported to:", base.Name)
+
+            task.wait(0.2)
+            game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.1)
+            game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.E, false, game)
+
+            task.wait(1)
+        end
+
+        task.wait(0.1)
+    end
+
+    print("Auto farm loop ended.")
+end
+
+local Toggle = MainTab:CreateToggle({
+   Name = "Auto Farm Box Heaven Stand",
+   CurrentValue = false,
+   Flag = "Toggle1",
+   Callback = function(Value)
+      isLooping = Value -- Set loop state based on toggle
+      if isLooping then
+         print("Auto Farm Box Heaven Stand activated.")
+         coroutine.wrap(startAutoFarm)() -- Run the auto farm loop in a separate thread
+      else
+         print("Auto Farm Box Heaven Stand deactivated.")
+      end
+   end,
+})
+
+local TPTab = Window:CreateTab("Teleports", nil)
+
+local Button1 = TPTab:CreateButton({
+   Name = "Item Seller",
+   Callback = function()
+      game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame =
+         workspace.Map.NPCs.AMM_Devs.HumanoidRootPart.CFrame
+      print("Teleported to Item Seller.")
+   end,
+})
+
+local Button2 = TPTab:CreateButton({
+   Name = "Storage",
+   Callback = function()
+      game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame =
+         workspace.Map.NPCs.Hat_Kidc.HumanoidRootPart.CFrame
+      print("Teleported to Storage.")
+   end,
+})
