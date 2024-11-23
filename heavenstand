@@ -4,7 +4,7 @@ if game.PlaceId == 14561998168 then
     local Window = Rayfield:CreateWindow({
        Name = "best script ever",
        LoadingTitle = "testing bro",
-       LoadingSubtitle = "by PEAK8080",
+       LoadingSubtitle = "by คนหล่อ",
        ConfigurationSaving = {
           Enabled = false,
           FolderName = nil,
