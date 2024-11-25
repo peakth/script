@@ -1,0 +1,178 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Create the Rayfield Window
+local Window = Rayfield:CreateWindow({
+    Name = "Teleportation & Health Monitor",
+    Icon = 0,
+    LoadingTitle = "Teleport Loop",
+    LoadingSubtitle = "by PEAK8080",
+    ConfigurationSaving = {
+        Enabled = false,
+        FolderName = nil,
+        FileName = "TeleportHub"
+    }
+})
+
+-- Create the Main Tab
+local MainTab = Window:CreateTab("Main", nil)
+local MainSection = MainTab:CreateSection("Teleport Controls")
+
+-- Initialize variables
+local selectedPlayer = nil
+local isLooping = false
+local running = false  -- New flag to track the state of the loop
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local distance = 3  -- Set the distance you want to teleport in front of the target player
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Function to update the player list in the dropdown
+local function updatePlayerList()
+    local playerNames = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Name ~= localPlayer.Name then
+            table.insert(playerNames, player.Name)
+        end
+    end
+    return playerNames
+end
+
+-- Create a Dropdown to select player
+local Dropdown = MainTab:CreateDropdown({
+    Name = "Select Player to TP To",
+    Options = updatePlayerList(),
+    CurrentOption = {"None"},
+    MultipleOptions = false,
+    Flag = "PlayerDropdown",
+    Callback = function(Options)
+        selectedPlayer = Options[1]
+        print("Selected player:", selectedPlayer)
+    end,
+})
+
+-- Update the dropdown options if player list changes
+Players.PlayerAdded:Connect(function()
+    Dropdown:Set(updatePlayerList()) -- Refresh the player list when a new player joins
+end)
+
+Players.PlayerRemoving:Connect(function()
+    Dropdown:Set(updatePlayerList()) -- Refresh the player list when a player leaves
+end)
+
+-- Function to handle teleportation to the selected player and make the character face the target
+local function teleportToPlayer(targetPlayer)
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local targetHRP = targetPlayer.Character.HumanoidRootPart
+        local targetPosition = targetHRP.Position + targetHRP.CFrame.LookVector * distance  -- Teleport in front of the target player
+
+        -- Set the character's CFrame to the new position, and make it face the target
+        localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(targetPosition, targetHRP.Position)
+
+        print("Teleported to player", targetPlayer.Name)
+    else
+        print("Target player not found or their HumanoidRootPart is missing.")
+    end
+end
+
+-- Create a Toggle to start/stop the TP loop
+local Toggle = MainTab:CreateToggle({
+    Name = "Start TP Loop",
+    CurrentValue = false,
+    Flag = "TPLoopToggle",
+    Callback = function(Value)
+        isLooping = Value
+        if not selectedPlayer then
+            print("No player selected.")
+            isLooping = false
+            return
+        end
+
+        -- Stop the loop if toggle is turned off
+        if not isLooping then
+            print("TP Loop deactivated.")
+            running = false  -- Stop the loop
+            return
+        end
+
+        -- Run the teleportation loop in a separate thread (this keeps it running while the toggle is on)
+        if not running then
+            running = true  -- Set the loop as running
+            print("TP Loop started for", selectedPlayer)
+
+            -- Run the teleportation loop in a separate thread (this keeps it running while the toggle is on)
+            coroutine.wrap(function()
+                while running do
+                    local targetPlayer = Players:FindFirstChild(selectedPlayer)
+                    if targetPlayer then
+                        teleportToPlayer(targetPlayer)
+
+                        -- Check if **your own player's health** drops below 95
+                        local humanoid = localPlayer.Character:FindFirstChildOfClass('Humanoid')
+                        if humanoid then
+                            -- If health is below 95, reset it
+                            if humanoid.Health < 95 then
+                                print("Your health is below 95, resetting...")
+                                humanoid.Health = 0  -- This triggers the reset (your own player's health)
+                            end
+                        else
+                            print("Humanoid not found!")
+                        end
+                    else
+                        print("Target player not found.")
+                    end
+
+                    -- Wait for a short time before the next teleport
+                    task.wait(0.1)
+                end
+                print("TP Loop stopped.")
+            end)()
+        end
+    end,
+})
+
+-- Handle character respawn and re-initialize the loop
+localPlayer.CharacterAdded:Connect(function()
+    character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+    -- Restart the loop if it was active
+    if isLooping and not running then
+        print("Character respawned, restarting TP loop.")
+        running = true  -- Ensure the loop is running
+        coroutine.wrap(function()
+            while running do
+                local targetPlayer = Players:FindFirstChild(selectedPlayer)
+                if targetPlayer then
+                    teleportToPlayer(targetPlayer)
+
+                    -- Check if **your own player's health** drops below 95
+                    local humanoid = localPlayer.Character:FindFirstChildOfClass('Humanoid')
+                    if humanoid then
+                        -- If health is below 95, reset it
+                        if humanoid.Health < 95 then
+                            print("Your health is below 95, resetting...")
+                            humanoid.Health = 0  -- This triggers the reset (your own player's health)
+                        end
+                    else
+                        print("Humanoid not found!")
+                    end
+                else
+                    print("Target player not found.")
+                end
+
+                -- Wait for a short time before the next teleport
+                task.wait(0.1)
+            end
+            print("TP Loop stopped.")
+        end)()
+    end
+end)
+
+-- Notify the user when the script is executed
+Rayfield:Notify({
+    Title = "Script Executed",
+    Content = "Teleport Loop Script Active",
+    Duration = 5,
+    Image = 4483362458,
+})
