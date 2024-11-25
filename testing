@@ -20,7 +20,7 @@ local MainSection = MainTab:CreateSection("Teleport Controls")
 -- Initialize variables
 local selectedPlayer = nil
 local isLooping = false
-local running = false  -- New flag to track the state of the loop
+local running = false  -- Flag to track the state of the loop
 local Players = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
 local distance = 3  -- Set the distance you want to teleport in front of the target player
@@ -133,11 +133,18 @@ local Toggle = MainTab:CreateToggle({
 
 -- Handle character respawn and re-initialize the loop
 localPlayer.CharacterAdded:Connect(function()
+    -- Reinitialize the character, humanoidRootPart, and reset running state
     character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
     humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
-    -- Restart the loop if it was active
-    if isLooping and not running then
+    -- Stop the loop if it was running and re-trigger it
+    if running then
+        running = false  -- Stop the previous loop
+        print("Character respawned, resetting loop.")
+    end
+
+    -- Start the loop if it's toggled on
+    if isLooping then
         print("Character respawned, restarting TP loop.")
         running = true  -- Ensure the loop is running
         coroutine.wrap(function()
