@@ -1,0 +1,1705 @@
+local players = game:GetService("Players")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local serverStorage = game:GetService("ServerStorage")
+local runService = game:GetService("RunService")
+
+local replicatedRemotes = replicatedStorage:WaitForChild("Remotes")
+
+local FireBurstDuration = 30
+local AwakeningDuration = 3*60 --3 minutes
+
+local _Shinra = script.Parent
+local char = _Shinra:WaitForChild("CharacterUser") and _Shinra.CharacterUser.Value
+_Shinra.CharacterUser:Destroy()
+
+if char:FindFirstChild("Animate") then
+	char:FindFirstChild("Animate"):Destroy()
+end
+local animateScript = script.Parent:WaitForChild("CharacterAnimations",1)
+animateScript.Parent = char
+animateScript.Enabled = true
+
+local awakeningTrigger = replicatedStorage.Bindables.AwakenCharacter
+local player = players:GetPlayerFromCharacter(char)
+local hum = char:WaitForChild("Humanoid")
+local hrp = char:WaitForChild("HumanoidRootPart")
+local animator = hum:WaitForChild("Animator")
+local charValues = char:WaitForChild("Values")
+local UserInterface = script.Parent:WaitForChild("UserInterface").Value
+UserInterface.Name = "CharacterUI"
+local awakeningEnergy = player:WaitForChild("AwakeningEnergy")
+
+local manyMisc = require(replicatedStorage.Modules.ManyMisc)
+local characterHandler = require(serverStorage.Modules.CharacterHandler)
+
+local canBlock = script.CanBlock
+
+local animFolder = replicatedStorage.Animations.Shinra
+local plrAnimFolder = replicatedStorage.Animations.Player
+
+local SoundEffects = replicatedStorage:WaitForChild("SoundEffects")
+local VFX = replicatedStorage:WaitForChild("VFX")
+
+local _debuggingHitbox = workspace:GetAttribute("HitboxDebugging") and (workspace:GetAttribute("OnlyStudioHitboxes") and runService:IsStudio() or not workspace:GetAttribute("OnlyStudioHitboxes"))
+local _Debounces = _Shinra.Debounces
+
+_Debounces.Parent = char
+
+local _Function = _Shinra.R_Function
+local _Event = _Shinra.R_Event
+
+function Effects(plr,action,data)
+	local reffect = replicatedRemotes:FindFirstChild("EffectRemote")
+	local success,result = pcall(function()
+		if plr == true then
+			reffect:FireAllClients(action,data)
+		elseif type(plr) == "userdata" then
+			local player = plr or plr[1]
+			reffect:FireClient(player,action,data)
+		elseif type(plr) == "table" and #plr and #plr>=1 then
+			for i,player in plr do
+				reffect:FireClient(player,action,data)
+			end
+		end
+	end)
+	if runService:IsStudio() then
+		warn(success,result,plr)
+	end
+end
+
+local function Destroyed(x)
+	if not x then return true end
+	if x.Parent then return false end
+	local _, result = pcall(function() x.Parent = x end)
+	return result:match("locked") and true or false
+end
+
+local rng = Random.new()
+
+local blockCount = 0
+local newComboCount = 0
+local Combo = 1
+
+local connections = {}
+
+local actionsPreset = {
+	Running = false;
+	Dashing = false;
+	FireBurstActive = false;
+	PlayerLoaded = false;
+	HoldingM1 = false;
+	isBlocking = false;
+}
+
+local actions = table.clone(actionsPreset)
+
+local anims = {
+	Combo1 = animator:LoadAnimation(animFolder.Combo1);
+	Combo2 = animator:LoadAnimation(animFolder.Combo2);
+	Combo3 = animator:LoadAnimation(animFolder.Combo3);
+	Combo4 = animator:LoadAnimation(animFolder.Combo4);
+	Blocking = animator:LoadAnimation(animFolder.Blocking);
+	Uppercut = animator:LoadAnimation(animFolder.Uppercut);
+	Downslam = animator:LoadAnimation(animFolder.Downslam);
+	FireBurst = animator:LoadAnimation(animFolder.FireBurst);
+	FrontDash = animator:LoadAnimation(animFolder.FrontDash);
+	LeftDash = animator:LoadAnimation(animFolder.LeftDash);
+	RightDash = animator:LoadAnimation(animFolder.RightDash);
+	BackDash = animator:LoadAnimation(animFolder.BackDash);
+	Awaken = animator:LoadAnimation(animFolder.Awakening);
+}
+	
+function stopAllAnims(transition,animator)
+	if animator and (animator:IsA("Humanoid") or animator:IsA("Animator")) then
+		if animator:IsA("Humanoid") then
+			animator = animator:FindFirstChild("Animator") or animator
+		end
+		for i,anim in animator:GetPlayingAnimationTracks() do
+			anim:Stop(transition or 0)
+		end
+	else
+		for i,anim in anims do
+			anim:Stop(transition or 0)
+		end
+	end
+end
+
+function newDebounce(_Name,Duration)
+	if _Name and Duration then
+		local Debounce = Instance.new("NumberValue") do
+			Debounce.Name = _Name
+			Debounce.Value = tick()
+			Debounce:SetAttribute("Duration",Duration)
+			Debounce.Parent = _Debounces
+			game.Debris:AddItem(Debounce,Duration)
+		end
+		return Debounce
+	else
+		warn((not _Name and "No name")..(not _Name and not Duration "and")..(not Duration and "No duration").."for debounce have found; Return NIL")
+	end
+	return
+end
+
+function stunHandler(tTime,stunObj)
+	local sTime = tick()
+	local stunned = stunObj.Value
+	local stunEvent do
+		stunEvent = stunObj:GetPropertyChangedSignal("Value"):Connect(function()
+			if stunObj.Value then
+				stunned = true
+				stunEvent:Disconnect()
+			end
+		end)
+	end
+	repeat runService.Stepped:Wait() until tick()-sTime >= tTime or stunObj.Value or stunned 
+	stunned = not stunned and stunObj.Value or stunned
+	if stunEvent.Connected then
+		stunEvent:Disconnect()
+	end
+	return stunned
+end
+
+function timeDifference(tTime,nTime)
+	--[[local timeDifference = math.abs(tTime-nTime)
+	print(nTime.." player",tTime.." enemy",timeDifference.." difference")
+	if tTime < nTime then
+		return true
+	end]]
+	return false
+end
+
+function getLocalCFrame()
+	return charValues.HRPCFrame.Value
+end
+
+function getDebounce(_Name)
+	return _Debounces:FindFirstChild(_Name)
+end
+
+function getGroupDebounce(blacklist)
+	local currentDebounces = {}
+	for i,debounce in _Debounces:GetChildren() do
+		if not table.find(blacklist,debounce.Name) then
+			table.insert(currentDebounces,debounce)
+		end
+	end
+	return currentDebounces
+end
+
+function MouseMelee1()
+	--[[task.wait()
+	local oldDebounce = _Debounces:FindFirstChild("M1")
+	if oldDebounce then
+		if not Destroyed(oldDebounce) then
+			_Debounces:FindFirstChild("M1").Destroying:Wait()
+		end
+	end]]
+	local startT = tick()
+	local waitForSignal = _Function:InvokeClient(player,"RecieveSignal")
+		
+	if actions.HoldingM1 and waitForSignal and not _Debounces:FindFirstChild("M1") and (charValues:FindFirstChild("CanAttack") and charValues.CanAttack.Value and not charValues.Stunned:GetAttribute("ReallyStunned")) then
+		newComboCount = (newComboCount+1)%100
+		local currentComboCount = newComboCount
+		charValues.LastTimeAttacked.Value = tick()
+		if Combo == 1 then
+			charValues.CanAttack.Value = false
+			local currentDebounce = newDebounce("M1",0.3)
+			Combo = 2 
+			task.delay(1.5,function()
+				if currentComboCount == newComboCount and Combo == 2 then
+					Combo = 1
+				end
+			end)
+			stopAllAnims(0.1)
+			anims.Combo1:Play(0.1)
+			local swing_sfx = SoundEffects.Shinra.Swing1:Clone() do
+				swing_sfx.Parent = hrp
+				swing_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+				swing_sfx:Play()
+				game.Debris:AddItem(swing_sfx,swing_sfx.TimeLength/swing_sfx.PlaybackSpeed)
+			end
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			charValues.CanJump.Value = false
+			task.spawn(function()
+				anims.Combo1.Stopped:Wait()
+				task.wait(0.25)
+				if currentJump == manyMisc:GetCount(charValues.CanJump) and Combo == 2 then
+					charValues.CanJump.Value = true
+				end
+			end)
+			
+			charValues.CanRun.Value = false
+			local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+			task.spawn(function()
+				anims.Combo1.Stopped:Wait()
+				if currentRun == manyMisc:GetCount(charValues.CanRun) then
+					charValues.CanRun.Value = true
+				end
+			end)
+			
+			if not stunHandler(0.1,charValues.Stunned) then
+				local MeleeHitbox = Instance.new("Part") do
+					local backDistance = 2
+					local frontDistance = 5
+					local sides = 2.75
+					MeleeHitbox.Material = Enum.Material.SmoothPlastic
+					MeleeHitbox.Color = Color3.fromRGB(255,0,0)
+					MeleeHitbox.Size = Vector3.new(sides*2,7,frontDistance+backDistance)
+					MeleeHitbox.Transparency = _debuggingHitbox and 0.75 or 1
+					MeleeHitbox.CanCollide = false
+					MeleeHitbox.CastShadow = false
+					MeleeHitbox.Anchored = true
+					MeleeHitbox.CFrame = getLocalCFrame() * CFrame.new(0,1,-frontDistance/2+backDistance/2)
+					MeleeHitbox.CollisionGroup = "Hitbox"
+					MeleeHitbox.Parent = workspace.Terrain
+					if _debuggingHitbox then
+						game.Debris:AddItem(MeleeHitbox,3)
+					end
+				end
+				--later ill make sorting to save some memory space, though it still takes just a LITTLE bit of it
+				local alreadyHit = {}
+				
+				local overlapingHitbox = OverlapParams.new()
+				overlapingHitbox.CollisionGroup = "Hitbox"
+				overlapingHitbox.FilterDescendantsInstances = {char}
+				overlapingHitbox.FilterType = Enum.RaycastFilterType.Exclude
+					
+				local partsInHitbox = workspace:GetPartsInPart(MeleeHitbox,overlapingHitbox)
+				if not _debuggingHitbox then
+					MeleeHitbox:Destroy()
+				end
+				local attacked = false
+				for i,part in partsInHitbox do
+					if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+						local tchar = part.Parent
+						local tcharValues = tchar:FindFirstChild("Values")
+						local thum = tchar:WaitForChild("Humanoid")
+						local thrp = tchar:WaitForChild("HumanoidRootPart")
+						local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+						if (possibleDebounce and timeDifference(possibleDebounce.Value,currentDebounce.Value)) or tcharValues:FindFirstChild("SpawnProtection") or table.find(alreadyHit,tchar) or thum.Health <= 0 or (tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or (tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then continue end
+						table.insert(alreadyHit,tchar)
+						
+						local distance = (getLocalCFrame().Position-thrp.Position).Magnitude
+						local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(getLocalCFrame().Position,thrp.Position).LookVector)
+						
+						tcharValues.LastWhoAttacked.Value = player
+						tcharValues.LastWhoAttacked:SetAttribute("Updated",tick())
+						
+						if tchar:FindFirstChild("Blocking") and (directionDot <= 0.5 or distance <= 1) then
+							local blocked_sfx = SoundEffects.BlockHit:Clone() do
+								blocked_sfx.Parent = thrp
+								blocked_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+								blocked_sfx:Play()
+								game.Debris:AddItem(blocked_sfx,blocked_sfx.TimeLength/blocked_sfx.PlaybackSpeed)
+							end
+						else
+							if tchar:FindFirstChild("Blocking") then
+								tchar:FindFirstChild("Blocking"):Destroy()
+							end
+							
+							local knockRange = 2.5 --changes the enemies and players flight
+							
+							if tcharValues.Stunned:GetAttribute("CanStun") then
+								tcharValues.Stunned.Value = true
+								local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+								task.delay(0.75,function()
+									if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+										tcharValues.Stunned.Value = false
+									end
+								end)
+							end
+							
+							manyMisc:removeAllBodyMovers(tchar,true,true)
+							
+							local tknockback = Instance.new("BodyPosition") do
+								tknockback.P = 10000
+								tknockback.D = 600
+								tknockback.MaxForce = Vector3.new(1,0,1) * 5000
+								tknockback.Parent = thrp
+								tknockback.Position = (CFrame.new(thrp.Position,getLocalCFrame().Position) * CFrame.new(0,0,knockRange)).Position
+								game.Debris:AddItem(tknockback,0.1)
+							end
+							
+							knockRange = math.clamp(distance-1,0,knockRange)
+							
+							thum.Health = math.clamp(thum.Health-3.5,0,thum.MaxHealth)
+							local hitAnim = thum:LoadAnimation(plrAnimFolder.Hits:GetChildren()[math.random(1,#plrAnimFolder.Hits:GetChildren())])
+							hitAnim:Play(0.1)
+							if not attacked then
+								attacked = true
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.5*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+								manyMisc:removeAllBodyMovers(char,true,true)
+								Effects(true,"ShinraHit1",{char,tchar,true})
+								local pknockback = Instance.new("BodyPosition") do
+									pknockback.P = 10000
+									pknockback.D = 600
+									pknockback.MaxForce = Vector3.new(1,0,1) * 5000
+									pknockback.Parent = hrp
+									pknockback.Position = (CFrame.new(getLocalCFrame().Position,thrp.Position) * CFrame.new(0,0,-knockRange)).Position
+									game.Debris:AddItem(pknockback,0.1)
+								end
+								--[[local hit_sfx = SoundEffects.Hit:Clone() do
+									hit_sfx.Parent = thrp
+									hit_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+									hit_sfx:Play()
+									game.Debris:AddItem(hit_sfx,hit_sfx.TimeLength/hit_sfx.PlaybackSpeed)
+								end]]
+							else
+								Effects(true,"ShinraHit1",{char,tchar,false})
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.25*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+							end
+							game.Debris:AddItem(tknockback,0.1)
+						end
+					end
+				end
+				if not Destroyed(currentDebounce) then
+					currentDebounce.Destroying:Wait()
+				end
+				charValues.CanAttack.Value = true
+				--MouseMelee1()
+			else
+				charValues.CanAttack.Value = true
+				stopAllAnims(0.1)
+			end
+		elseif Combo == 2 then
+			charValues.CanAttack.Value = false
+			local currentDebounce = newDebounce("M1",0.3)
+			Combo = 3 
+			task.delay(1.5,function()
+				if currentComboCount == newComboCount and Combo == 3 then
+					Combo = 1
+				end
+			end)
+			stopAllAnims(0.1)
+			anims.Combo2:Play(0.1)
+			
+			local swing_sfx = SoundEffects.Shinra.Swing2:Clone() do
+				swing_sfx.Parent = hrp
+				swing_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+				swing_sfx:Play()
+				game.Debris:AddItem(swing_sfx,swing_sfx.TimeLength/swing_sfx.PlaybackSpeed)
+			end
+			charValues.CanJump.Value = false
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			task.spawn(function()
+				anims.Combo2.Stopped:Wait()
+				task.wait(0.25)
+				if currentJump == manyMisc:GetCount(charValues.CanJump) and Combo == 3 then
+					charValues.CanJump.Value = true
+				end
+			end)
+			
+			charValues.CanRun.Value = false
+			local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+			task.spawn(function()
+				anims.Combo2.Stopped:Wait()
+				if currentRun == manyMisc:GetCount(charValues.CanRun) then
+					charValues.CanRun.Value = true
+				end
+			end)
+			if not stunHandler(0.15,charValues.Stunned) then
+				local MeleeHitbox = Instance.new("Part") do
+					local backDistance = 2
+					local frontDistance = 5
+					local sides = 2.75
+					MeleeHitbox.Material = Enum.Material.SmoothPlastic
+					MeleeHitbox.Color = Color3.fromRGB(255,0,0)
+					MeleeHitbox.Size = Vector3.new(sides*2,7,frontDistance+backDistance)
+					MeleeHitbox.Transparency = _debuggingHitbox and 0.75 or 1
+					MeleeHitbox.CanCollide = false
+					MeleeHitbox.CastShadow = false
+					MeleeHitbox.Anchored = true
+					MeleeHitbox.CFrame = getLocalCFrame() * CFrame.new(0,1,-frontDistance/2+backDistance/2)
+					MeleeHitbox.CollisionGroup = "Hitbox"
+					MeleeHitbox.Parent = workspace.Terrain
+					if _debuggingHitbox then
+						game.Debris:AddItem(MeleeHitbox,3)
+					end
+				end
+				--later ill make sorting to save some memory space, though it still takes just a LITTLE bit of it
+				local alreadyHit = {}
+
+				local overlapingHitbox = OverlapParams.new()
+				overlapingHitbox.CollisionGroup = "Hitbox"
+				overlapingHitbox.FilterDescendantsInstances = {char}
+				overlapingHitbox.FilterType = Enum.RaycastFilterType.Exclude
+
+				local partsInHitbox = workspace:GetPartsInPart(MeleeHitbox,overlapingHitbox)
+				if not _debuggingHitbox then
+					MeleeHitbox:Destroy()
+				end
+				local attacked = false
+				for i,part in partsInHitbox do
+					if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+						local tchar = part.Parent
+						local tcharValues = tchar:FindFirstChild("Values")
+						local thum = tchar:WaitForChild("Humanoid")
+						local thrp = tchar:WaitForChild("HumanoidRootPart")
+						local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+						if (possibleDebounce and timeDifference(possibleDebounce.Value,currentDebounce.Value)) or tcharValues:FindFirstChild("SpawnProtection") or table.find(alreadyHit,tchar) or thum.Health <= 0 or (tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or (tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then continue end
+						table.insert(alreadyHit,tchar)
+						local distance = (getLocalCFrame().Position-thrp.Position).Magnitude
+						local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(getLocalCFrame().Position,thrp.Position).LookVector)
+						
+						tcharValues.LastWhoAttacked.Value = player
+						tcharValues.LastWhoAttacked:SetAttribute("Updated",tick())
+
+						if tchar:FindFirstChild("Blocking") and (directionDot <= 0.5 or distance <= 1) then
+							local blocked_sfx = SoundEffects.BlockHit:Clone() do
+								blocked_sfx.Parent = thrp
+								blocked_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+								blocked_sfx:Play()
+								game.Debris:AddItem(blocked_sfx,blocked_sfx.TimeLength/blocked_sfx.PlaybackSpeed)
+							end
+						else
+							if tchar:FindFirstChild("Blocking") then
+								tchar:FindFirstChild("Blocking"):Destroy()
+							end
+
+							local knockRange = 2.5 --changes the enemies and players flight
+							
+							if tcharValues.Stunned:GetAttribute("CanStun") then
+								tcharValues.Stunned.Value = true
+								local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+								task.delay(0.75,function()
+									if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+										tcharValues.Stunned.Value = false
+									end
+								end)
+							end
+							
+							manyMisc:removeAllBodyMovers(tchar,true,true)
+							
+							local tknockback = Instance.new("BodyPosition") do
+								tknockback.P = 10000
+								tknockback.D = 600
+								tknockback.MaxForce = Vector3.new(1,0,1) * 5000
+								tknockback.Parent = thrp
+								tknockback.Position = (CFrame.new(thrp.Position,getLocalCFrame().Position) * CFrame.new(0,0,knockRange)).Position
+								game.Debris:AddItem(tknockback,0.1)
+							end
+							
+							knockRange = math.clamp(distance-1,0,knockRange)
+							
+							thum.Health = math.clamp(thum.Health-3.5,0,thum.MaxHealth)
+							local hitAnim = thum:LoadAnimation(plrAnimFolder.Hits:GetChildren()[math.random(1,#plrAnimFolder.Hits:GetChildren())])
+							hitAnim:Play(0.1)
+							if not attacked then
+								attacked = true
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.5*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+								manyMisc:removeAllBodyMovers(char,true,true)
+								Effects(true,"ShinraHit2",{char,tchar,true})
+								local pknockback = Instance.new("BodyPosition") do
+									pknockback.P = 10000
+									pknockback.D = 600
+									pknockback.MaxForce = Vector3.new(1,0,1) * 5000
+									pknockback.Parent = hrp
+									pknockback.Position = (CFrame.new(getLocalCFrame().Position,thrp.Position) * CFrame.new(0,0,-knockRange)).Position
+									game.Debris:AddItem(pknockback,0.1)
+								end
+							else
+								Effects(true,"ShinraHit2",{char,tchar,false})
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.25*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+							end
+							game.Debris:AddItem(tknockback,0.1)
+						end
+					end
+				end
+				if not Destroyed(currentDebounce) then
+					currentDebounce.Destroying:Wait()
+				end
+				charValues.CanAttack.Value = true
+				--MouseMelee1()
+			else
+				charValues.CanAttack.Value = true
+				stopAllAnims(0.1)
+			end
+		elseif Combo == 3 then
+			charValues.CanAttack.Value = false
+			local currentDebounce = newDebounce("M1",0.3)
+			Combo = 4
+			task.delay(1.75,function()
+				if currentComboCount == newComboCount and Combo == 4 then
+					Combo = 1
+				end
+			end)
+			stopAllAnims(0.1)
+			anims.Combo3:Play(0.1)
+			local swing_sfx = SoundEffects.Shinra.Swing3:Clone() do
+				swing_sfx.Parent = hrp
+				swing_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+				swing_sfx:Play()
+				game.Debris:AddItem(swing_sfx,swing_sfx.TimeLength/swing_sfx.PlaybackSpeed)
+			end
+			
+			charValues.CanJump.Value = false
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			task.delay(0.6,function()
+				if currentJump == manyMisc:GetCount(charValues.CanJump) and Combo == 4 then
+					charValues.CanJump.Value = true
+				end
+			end)
+			
+			charValues.CanRun.Value = false
+			local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+			task.spawn(function()
+				anims.Combo3.Stopped:Wait()
+				if currentRun == manyMisc:GetCount(charValues.CanRun) then
+					charValues.CanRun.Value = true
+				end
+			end)
+			if not stunHandler(0.15,charValues.Stunned) then
+				local MeleeHitbox = Instance.new("Part") do
+					local backDistance = 2
+					local frontDistance = 5
+					local sides = 2.75
+					MeleeHitbox.Material = Enum.Material.SmoothPlastic
+					MeleeHitbox.Color = Color3.fromRGB(255,0,0)
+					MeleeHitbox.Size = Vector3.new(sides*2,7,frontDistance+backDistance)
+					MeleeHitbox.Transparency = _debuggingHitbox and 0.75 or 1
+					MeleeHitbox.CanCollide = false
+					MeleeHitbox.CastShadow = false
+					MeleeHitbox.Anchored = true
+					MeleeHitbox.CFrame = getLocalCFrame() * CFrame.new(0,1,-frontDistance/2+backDistance/2)
+					MeleeHitbox.CollisionGroup = "Hitbox"
+					MeleeHitbox.Parent = workspace.Terrain
+					if _debuggingHitbox then
+						game.Debris:AddItem(MeleeHitbox,3)
+					end
+				end
+				--later ill make sorting to save some memory space, though it still takes just a LITTLE bit of it
+				local alreadyHit = {}
+
+				local overlapingHitbox = OverlapParams.new()
+				overlapingHitbox.CollisionGroup = "Hitbox"
+				overlapingHitbox.FilterDescendantsInstances = {char}
+				overlapingHitbox.FilterType = Enum.RaycastFilterType.Exclude
+
+				local partsInHitbox = workspace:GetPartsInPart(MeleeHitbox,overlapingHitbox)
+				if not _debuggingHitbox then
+					MeleeHitbox:Destroy()
+				end
+				local attacked = false
+				for i,part in partsInHitbox do
+					if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+						local tchar = part.Parent
+						local tcharValues = tchar:FindFirstChild("Values")
+						local thum = tchar:WaitForChild("Humanoid")
+						local thrp = tchar:WaitForChild("HumanoidRootPart")
+						local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+						if (possibleDebounce and timeDifference(possibleDebounce.Value,currentDebounce.Value)) or tcharValues:FindFirstChild("SpawnProtection") or table.find(alreadyHit,tchar) or thum.Health <= 0 or (tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or (tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then continue end
+						table.insert(alreadyHit,tchar)
+						
+						local distance = (getLocalCFrame().Position-thrp.Position).Magnitude
+						local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(getLocalCFrame().Position,thrp.Position).LookVector)
+						
+						tcharValues.LastWhoAttacked.Value = player
+						tcharValues.LastWhoAttacked:SetAttribute("Updated",tick())
+						
+						if tchar:FindFirstChild("Blocking") and (directionDot <= 0.5 or distance <= 1) then
+							local blocked_sfx = SoundEffects.BlockHit:Clone() do
+								blocked_sfx.Parent = thrp
+								blocked_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+								blocked_sfx:Play()
+								game.Debris:AddItem(blocked_sfx,blocked_sfx.TimeLength/blocked_sfx.PlaybackSpeed)
+							end
+						else
+							if tchar:FindFirstChild("Blocking") then
+								tchar:FindFirstChild("Blocking"):Destroy()
+							end
+
+							local knockRange = 2.5 --changes the enemies and players flight
+							
+							if tcharValues.Stunned:GetAttribute("CanStun") then
+								tcharValues.Stunned.Value = true
+								local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+								task.delay(1,function()
+									if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+										tcharValues.Stunned.Value = false
+									end
+								end)
+							end
+							
+							manyMisc:removeAllBodyMovers(tchar,true,true)
+							
+							local tknockback = Instance.new("BodyPosition") do
+								tknockback.P = 10000
+								tknockback.D = 600
+								tknockback.MaxForce = Vector3.new(1,0,1) * 5000
+								tknockback.Parent = thrp
+								tknockback.Position = (CFrame.new(thrp.Position,getLocalCFrame().Position) * CFrame.new(0,0,knockRange)).Position
+								game.Debris:AddItem(tknockback,0.1)
+							end
+							
+							knockRange = math.clamp(distance-1,0,knockRange)
+							
+							thum.Health = math.clamp(thum.Health-4,0,thum.MaxHealth)
+							local hitAnim = thum:LoadAnimation(plrAnimFolder.Hits:GetChildren()[math.random(1,#plrAnimFolder.Hits:GetChildren())])
+							hitAnim:Play(0.1)
+							if not attacked then
+								attacked = true
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.5*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+								manyMisc:removeAllBodyMovers(char,true,true)
+								local pknockback = Instance.new("BodyPosition") do
+									pknockback.P = 10000
+									pknockback.D = 600
+									pknockback.MaxForce = Vector3.new(1,0,1) * 5000
+									pknockback.Parent = hrp
+									pknockback.Position = (CFrame.new(getLocalCFrame().Position,thrp.Position) * CFrame.new(0,0,-knockRange)).Position
+									game.Debris:AddItem(pknockback,0.1)
+								end
+								Effects(true,"ShinraHit3",{char,tchar,true})
+							else
+								Effects(true,"ShinraHit3",{char,tchar,false})
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.25*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+							end
+						end
+					end
+				end
+				if not Destroyed(currentDebounce) then
+					currentDebounce.Destroying:Wait()
+				end
+				charValues.CanAttack.Value = true
+				--MouseMelee1()
+			else
+				charValues.CanAttack.Value = true
+				stopAllAnims(0.1)
+			end
+		elseif Combo == 4 then
+			charValues.CanAttack.Value = false
+			local currentAttack = manyMisc:UpdateCount(charValues.CanAttack)
+			
+			local FinisherStyle = _Function:InvokeClient(player,"GetFinisherStyle")
+			local currentDebounce
+			
+			if FinisherStyle == "Downslam" then
+				currentDebounce = newDebounce("M1",2)
+				Combo = 1
+				stopAllAnims(0.1)
+				anims.Downslam:Play(0.1)
+				charValues.CanJump.Value = false
+				
+				local swing_sfx = SoundEffects.Shinra.downslamBuild:Clone() do
+					swing_sfx.Parent = hrp
+					swing_sfx.PlaybackSpeed = rng:NextNumber(1.1,1.5)
+					swing_sfx:Play()
+					game.Debris:AddItem(swing_sfx,swing_sfx.TimeLength/swing_sfx.PlaybackSpeed)
+				end
+				
+				charValues.CanRun.Value = false
+				local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+				task.spawn(function()
+					anims.Downslam.Stopped:Wait()
+					if currentRun == manyMisc:GetCount(charValues.CanRun) then
+						charValues.CanRun.Value = true
+					end
+				end)
+				if not stunHandler(0.3,charValues.Stunned) then
+					local MeleeHitbox = Instance.new("Part") do
+						local backDistance = 2
+						local frontDistance = 5
+						MeleeHitbox.Material = Enum.Material.SmoothPlastic
+						MeleeHitbox.Color = Color3.fromRGB(255,0,0)
+						MeleeHitbox.Size = Vector3.new(5.5,14,frontDistance+backDistance)
+						MeleeHitbox.Transparency = _debuggingHitbox and 0.75 or 1
+						MeleeHitbox.CanCollide = false
+						MeleeHitbox.CastShadow = false
+						MeleeHitbox.Anchored = true
+						MeleeHitbox.CFrame = getLocalCFrame() * CFrame.new(0,-6,-frontDistance/2+backDistance/2)
+						MeleeHitbox.CollisionGroup = "Hitbox"
+						MeleeHitbox.Parent = workspace.Terrain
+						if _debuggingHitbox then
+							game.Debris:AddItem(MeleeHitbox,3)
+						end
+					end
+					--later ill make sorting to save some memory space, though it still takes just a LITTLE bit of it
+					local alreadyHit = {}
+
+					local overlapingHitbox = OverlapParams.new()
+					overlapingHitbox.CollisionGroup = "Hitbox"
+					overlapingHitbox.FilterDescendantsInstances = {char}
+					overlapingHitbox.FilterType = Enum.RaycastFilterType.Exclude
+
+					local partsInHitbox = workspace:GetPartsInPart(MeleeHitbox,overlapingHitbox)
+					if not _debuggingHitbox then
+						MeleeHitbox:Destroy()
+					end
+					local attacked = false
+					for i,part in partsInHitbox do
+						if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+							local tchar = part.Parent
+							local tcharValues = tchar:FindFirstChild("Values")
+							local thum = tchar:WaitForChild("Humanoid")
+							local thrp = tchar:WaitForChild("HumanoidRootPart")
+							local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+							if (possibleDebounce and timeDifference(possibleDebounce.Value,currentDebounce.Value)) or tcharValues:FindFirstChild("SpawnProtection") or table.find(alreadyHit,tchar) or thum.Health <= 0 or (tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or (tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then continue end
+							table.insert(alreadyHit,tchar)
+
+							local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(getLocalCFrame().Position,thrp.Position).LookVector)
+
+							tcharValues.LastWhoAttacked.Value = player
+							tcharValues.LastWhoAttacked:SetAttribute("Updated",tick())
+
+							if tchar:FindFirstChild("Blocking") then
+								tchar:FindFirstChild("Blocking"):Destroy()
+							end
+							
+							Effects(true,"ShinraDownslam",{char,tchar,thrp.CFrame,false})
+							
+							stopAllAnims(0.05,thum)
+							
+							local knockRange = 1--changes the enemies and players flight
+							
+							local rayParams = RaycastParams.new()
+							rayParams.CollisionGroup = "OnlyDefault"
+							rayParams.FilterType = Enum.RaycastFilterType.Exclude
+							rayParams.FilterDescendantsInstances = {tchar,char}
+
+							local collisionRay = workspace:Raycast(thrp.Position+Vector3.new(0,2,0),Vector3.new(0,-1,0) * 10,rayParams)
+							
+							local startCFrame = thrp.CFrame * CFrame.Angles(math.rad(90),0,0) + Vector3.new(0,-1,0)
+							if collisionRay then
+								startCFrame = startCFrame.Rotation + collisionRay.Position + Vector3.new(0,1,0)
+							end
+							
+							
+							--[[local tknockback = Instance.new("BodyPosition") do
+								tknockback.P = 10000
+								tknockback.D = 300
+								tknockback.MaxForce = Vector3.new(1,1,1) * 400000
+								tknockback.Parent = thrp
+								tknockback.Position = startCFrame.p
+								game.Debris:AddItem(tknockback,0.2)
+							end
+
+							local tknockrotation = Instance.new("BodyGyro") do
+								tknockrotation.P = 10000
+								tknockrotation.MaxTorque = Vector3.new(1,1,1) * 400000
+								tknockrotation.D = 200
+								tknockrotation.Parent = thrp
+								tknockrotation.CFrame = startCFrame
+								game.Debris:AddItem(tknockrotation,0.2)
+							end]]
+							
+							manyMisc:removeAllBodyMovers(tchar,true,true)
+							
+							tcharValues.Stunned.Value = true
+							local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+							task.delay(0.75,function()
+								if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+									tcharValues.Stunned.Value = false
+								end
+							end)
+							
+							tcharValues.CanRotateTorso.Value = false
+							local currentRotateTorso = manyMisc:UpdateCount(tcharValues.CanRotateTorso)
+							task.wait()
+							thrp.Anchored = true
+							tchar:PivotTo(startCFrame)
+							
+							local currentRagdolled = manyMisc:UpdateCount(tcharValues.Ragdolled)
+							
+							task.delay(0.1,function()
+								local currentRagdolled = manyMisc:UpdateCount(tcharValues.Ragdolled)
+								tcharValues.Ragdolled.Value = true
+								task.wait()
+								thrp.Anchored = false
+								task.delay(2.4,function()
+									if currentRagdolled == manyMisc:GetCount(tcharValues.Ragdolled) then
+										tcharValues.Ragdolled.Value = false
+									end
+									if currentRotateTorso == manyMisc:GetCount(tcharValues.CanRotateTorso) then
+										tcharValues.CanRotateTorso.Value = true
+									end
+								end)
+							end)
+							
+							thum.Health = math.clamp(thum.Health-4,0,thum.MaxHealth)
+							
+							if not attacked then
+								attacked = true
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+1*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+								--[[local hit_sfx = SoundEffects.Hit:Clone() do
+									hit_sfx.Parent = thrp
+									hit_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+									hit_sfx:Play()
+									game.Debris:AddItem(hit_sfx,hit_sfx.TimeLength/hit_sfx.PlaybackSpeed)
+								end]]
+							else
+								awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.5*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+							end
+						end
+					end
+					if not attacked then
+						charValues.Stunned.Value = true
+						local currentStun = manyMisc:UpdateCount(charValues.Stunned)
+						task.delay(0.5,function()
+							if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+								charValues.CanAttack.Value = true
+							end
+							task.wait(0.5)
+							if currentStun == manyMisc:GetCount(charValues.Stunned) then
+								charValues.Stunned.Value = false
+							end
+						end)
+					else
+						if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+							charValues.CanAttack.Value = true
+						end
+					end
+					if anims.Downslam.IsPlaying then
+						anims.Downslam.Stopped:Wait()
+					end
+				else
+					stopAllAnims(0.1)
+				end
+			elseif FinisherStyle == "Uppercut" then
+				currentDebounce = newDebounce("M1",1.5)
+				Combo = 1
+				stopAllAnims(0.1)
+				anims.Uppercut:Play(0.1)
+				charValues.CanJump.Value = false
+				charValues.CanRun.Value = false
+
+				local swing_sfx = SoundEffects.Shinra.upperCutWoosh:Clone()
+				swing_sfx.Parent = hrp
+				swing_sfx.PlaybackSpeed = rng:NextNumber(0.9, 1.1)
+				swing_sfx:Play()
+				game.Debris:AddItem(swing_sfx, swing_sfx.TimeLength / swing_sfx.PlaybackSpeed)
+
+				local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+				task.spawn(function()
+					anims.Uppercut.Stopped:Wait()
+					if currentRun == manyMisc:GetCount(charValues.CanRun) then
+						charValues.CanRun.Value = true
+					end
+				end)
+
+				if not stunHandler(0.2, charValues.Stunned) then
+					local MeleeHitbox = Instance.new("Part")
+					local backDistance = 2
+					local frontDistance = 7.5
+					MeleeHitbox.Material = Enum.Material.SmoothPlastic
+					MeleeHitbox.Color = Color3.fromRGB(255, 0, 0)
+					MeleeHitbox.Size = Vector3.new(5.5, 7, frontDistance + backDistance)
+					MeleeHitbox.Transparency = _debuggingHitbox and 0.75 or 1
+					MeleeHitbox.CanCollide = false
+					MeleeHitbox.CastShadow = false
+					MeleeHitbox.Anchored = true
+					MeleeHitbox.CFrame = getLocalCFrame() * CFrame.new(0, 1, -frontDistance / 2 + backDistance / 2)
+					MeleeHitbox.CollisionGroup = "Hitbox"
+					MeleeHitbox.Parent = workspace.Terrain
+
+					if _debuggingHitbox then
+						game.Debris:AddItem(MeleeHitbox, 3)
+					end
+
+					local alreadyHit = {}
+					local overlapingHitbox = OverlapParams.new()
+					overlapingHitbox.CollisionGroup = "Hitbox"
+					overlapingHitbox.FilterDescendantsInstances = {char}
+					overlapingHitbox.FilterType = Enum.RaycastFilterType.Exclude
+
+					local partsInHitbox = workspace:GetPartsInPart(MeleeHitbox, overlapingHitbox)
+					if not _debuggingHitbox then
+						MeleeHitbox:Destroy()
+					end
+
+					local attacked = false
+					for i, part in pairs(partsInHitbox) do
+						if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+							local tchar = part.Parent
+							local tcharValues = tchar:FindFirstChild("Values")
+							local thum = tchar:WaitForChild("Humanoid")
+							local thrp = tchar:WaitForChild("HumanoidRootPart")
+							local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+
+							-- Check for various conditions before proceeding
+							if (possibleDebounce and timeDifference(possibleDebounce.Value, currentDebounce.Value)) or 
+								tcharValues:FindFirstChild("SpawnProtection") or 
+								table.find(alreadyHit, tchar) or 
+								thum.Health <= 0 or 
+								(tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or 
+								(tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then
+								continue
+							end
+
+							table.insert(alreadyHit, tchar)
+							local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(getLocalCFrame().Position, thrp.Position).LookVector)
+							tcharValues.LastWhoAttacked.Value = player
+							tcharValues.LastWhoAttacked:SetAttribute("Updated", tick())
+
+							if tchar:FindFirstChild("Blocking") and directionDot <= 0.5 then
+								local blocked_sfx = SoundEffects.BlockHit:Clone() do
+									blocked_sfx.Parent = thrp
+									blocked_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+									blocked_sfx:Play()
+									game.Debris:AddItem(blocked_sfx,blocked_sfx.TimeLength/blocked_sfx.PlaybackSpeed)
+								end
+							else
+								if tchar:FindFirstChild("Blocking") then
+									tchar:FindFirstChild("Blocking"):Destroy()
+								end
+
+								local knockRange = 15  -- Changes the enemies and players flight
+								tcharValues.Stunned.Value = true
+								local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+								task.delay(0.75, function()
+									if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+										tcharValues.Stunned.Value = false
+									end
+								end)
+
+								tcharValues.Ragdolled.Value = true
+								local currentRagdoll = manyMisc:UpdateCount(tcharValues.Ragdolled)
+								task.delay(1.75, function()
+									if currentRagdoll == manyMisc:GetCount(tcharValues.Ragdolled) then
+										tcharValues.Ragdolled.Value = false
+									end
+								end)
+
+								manyMisc:removeAllBodyMovers(tchar, true, true)
+
+								-- Apply knockback
+								local tknockback = Instance.new("BodyPosition")
+								tknockback.P = 5000
+								tknockback.D = 500
+								tknockback.MaxForce = Vector3.new(1, 1, 1) * 400000
+								tknockback.Position = (CFrame.new(thrp.Position, getLocalCFrame().Position) * CFrame.new(0, 0, 0.5)).Position * Vector3.new(1, 0, 1) + Vector3.new(0, getLocalCFrame().Position.Y + knockRange, 0)
+								tknockback.Parent = thrp
+								game.Debris:AddItem(tknockback, 0.2)
+
+								local tknockrotation = Instance.new("BodyGyro")
+								tknockrotation.P = 5000
+								tknockrotation.MaxTorque = Vector3.new(1, 1, 1) * 400000
+								tknockrotation.D = 400
+								tknockrotation.Parent = thrp
+								tknockrotation.CFrame = thrp.CFrame * CFrame.Angles(0, 0, math.rad(45))
+								game.Debris:AddItem(tknockrotation, 0.1)
+
+								thum.Health = math.clamp(thum.Health - 4, 0, thum.MaxHealth)
+
+								Effects(true, "ShinraUppercut", {char, tchar, thrp.CFrame, false})
+
+								if not attacked then
+									attacked = true
+									awakeningEnergy.Value = math.clamp(awakeningEnergy.Value + 1 * charValues.CharacterSettings.DamageMultiplier.Value, 0, awakeningEnergy:GetAttribute("MaxEnergy"))
+									local hit_sfx = SoundEffects.Hit:Clone()
+									hit_sfx.Parent = thrp
+									hit_sfx.PlaybackSpeed = rng:NextNumber(0.9, 1.1)
+									hit_sfx:Play()
+									game.Debris:AddItem(hit_sfx, hit_sfx.TimeLength / hit_sfx.PlaybackSpeed)
+								else
+									awakeningEnergy.Value = math.clamp(awakeningEnergy.Value + 0.5 * charValues.CharacterSettings.DamageMultiplier.Value, 0, awakeningEnergy:GetAttribute("MaxEnergy"))
+								end
+							end
+						end
+					end
+
+					if not attacked then
+						charValues.Stunned.Value = true
+						local currentStun = manyMisc:UpdateCount(charValues.Stunned)
+						task.delay(0.5, function()
+							if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+								charValues.CanAttack.Value = true
+							end
+							task.wait(0.5)
+							if currentStun == manyMisc:GetCount(charValues.Stunned) then
+								charValues.Stunned.Value = false
+							end
+						end)
+					else
+						if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+							charValues.CanAttack.Value = true
+						end
+					end
+
+					if anims.Uppercut.IsPlaying then
+						anims.Uppercut.Stopped:Wait()
+					end
+				else
+					stopAllAnims(0.1)
+				end
+			elseif FinisherStyle == "Punch" then
+				currentDebounce = newDebounce("M1",1.5)
+				Combo = 1
+				stopAllAnims(0.1)
+				anims.Combo4:Play(0.1)
+				local swing_sfx = SoundEffects.Shinra.Swing4:Clone() do
+					swing_sfx.Parent = hrp
+					swing_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+					swing_sfx:Play()
+					game.Debris:AddItem(swing_sfx,swing_sfx.TimeLength/swing_sfx.PlaybackSpeed)
+				end
+				charValues.CanJump.Value = false
+				
+				charValues.CanRun.Value = false
+				local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+				task.spawn(function()
+					anims.Combo4.Stopped:Wait()
+					if currentRun == manyMisc:GetCount(charValues.CanRun) then
+						charValues.CanRun.Value = true
+					end
+				end)
+				if not stunHandler(0.1,charValues.Stunned) then
+					local MeleeHitbox = Instance.new("Part") do
+						local backDistance = 2
+						local frontDistance = 5
+						MeleeHitbox.Material = Enum.Material.SmoothPlastic
+						MeleeHitbox.Color = Color3.fromRGB(255,0,0)
+						MeleeHitbox.Size = Vector3.new(7,7,frontDistance+backDistance)
+						MeleeHitbox.Transparency = _debuggingHitbox and 0.75 or 1
+						MeleeHitbox.CanCollide = false
+						MeleeHitbox.CastShadow = false
+						MeleeHitbox.Anchored = true
+						MeleeHitbox.CFrame = getLocalCFrame() * CFrame.new(0,1,-frontDistance/2+backDistance/2)
+						MeleeHitbox.CollisionGroup = "Hitbox"
+						MeleeHitbox.Parent = workspace.Terrain
+						if _debuggingHitbox then
+							game.Debris:AddItem(MeleeHitbox,3)
+						end
+					end
+					--later ill make sorting to save some memory space, though it still takes just a LITTLE bit of it
+					local alreadyHit = {}
+
+					local overlapingHitbox = OverlapParams.new()
+					overlapingHitbox.CollisionGroup = "Hitbox"
+					overlapingHitbox.FilterDescendantsInstances = {char}
+					overlapingHitbox.FilterType = Enum.RaycastFilterType.Exclude
+
+					local partsInHitbox = workspace:GetPartsInPart(MeleeHitbox,overlapingHitbox)
+					if not _debuggingHitbox then
+						MeleeHitbox:Destroy()
+					end
+					local attacked = false
+					for i,part in partsInHitbox do
+						if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+							local tchar = part.Parent
+							local tcharValues = tchar:FindFirstChild("Values")
+							local thum = tchar:WaitForChild("Humanoid")
+							local thrp = tchar:WaitForChild("HumanoidRootPart")
+							local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+							if (possibleDebounce and timeDifference(possibleDebounce.Value,currentDebounce.Value)) or tcharValues:FindFirstChild("SpawnProtection") or table.find(alreadyHit,tchar) or thum.Health <= 0 or (tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or (tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then continue end
+							table.insert(alreadyHit,tchar)
+
+							local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(getLocalCFrame().Position,thrp.Position).LookVector)
+
+							tcharValues.LastWhoAttacked.Value = player
+							tcharValues.LastWhoAttacked:SetAttribute("Updated",tick())
+							
+							if tchar:FindFirstChild("Blocking") and directionDot <= 0.5 then
+								local blocked_sfx = SoundEffects.BlockHit:Clone() do
+									blocked_sfx.Parent = thrp
+									blocked_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+									blocked_sfx:Play()
+									game.Debris:AddItem(blocked_sfx,blocked_sfx.TimeLength/blocked_sfx.PlaybackSpeed)
+								end
+							else
+								if tchar:FindFirstChild("Blocking") then
+									tchar:FindFirstChild("Blocking"):Destroy()
+								end
+
+								local knockRange = 7 --changes the enemies and players flight
+								
+								tcharValues.Stunned.Value = true
+								local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+								task.delay(0.75,function()
+									if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+										tcharValues.Stunned.Value = false
+									end
+								end)
+
+								tcharValues.Ragdolled.Value = true
+								local currentRagdoll = manyMisc:UpdateCount(tcharValues.Ragdolled)
+								task.delay(1.75,function()
+									if currentRagdoll == manyMisc:GetCount(tcharValues.Ragdolled) then
+										tcharValues.Ragdolled.Value = false
+									end
+								end)
+								
+								manyMisc:removeAllBodyMovers(tchar,true,true)
+								
+								local tknockback = Instance.new("BodyPosition") do
+									tknockback.P = 5000
+									tknockback.D = 500
+									tknockback.MaxForce = Vector3.new(1,1,1) * 3500
+									tknockback.Parent = thrp
+									tknockback.Position = (CFrame.new(thrp.Position,getLocalCFrame().Position) * CFrame.new(0,0,knockRange)).Position * Vector3.new(1,0,1) + Vector3.new(0,getLocalCFrame().Position.Y+8,0)
+									game.Debris:AddItem(tknockback,0.1)
+								end
+
+								local tknockrotation = Instance.new("BodyGyro") do
+									tknockrotation.P = 5000
+									tknockrotation.MaxTorque = Vector3.new(1,1,1) * 30000
+									tknockrotation.D = 500
+									tknockrotation.Parent = thrp
+									local lookCF = CFrame.new(thrp.Position,getLocalCFrame().Position)
+									--local offsetCF = CFrame.new(thrp.Position,getLocalCFrame().Position)
+									tknockrotation.CFrame = lookCF * CFrame.Angles(math.rad(135),math.rad(5),0) --CFrame.new(thrp.Position,getLocalCFrame().Position).LookVector.Unit*Vector3.new(1,0,1)+Vector3.new(0,5,0)
+									game.Debris:AddItem(tknockrotation,0.1)
+								end
+
+								thum.Health = math.clamp(thum.Health-4,0,thum.MaxHealth)
+
+								if not attacked then
+									attacked = true
+									awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+1*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+									Effects(true,"ShinraHit4",{char,tchar,true})
+								else
+									Effects(true,"ShinraHit4",{char,tchar,false})
+									awakeningEnergy.Value = math.clamp(awakeningEnergy.Value+0.5*charValues.CharacterSettings.DamageMultiplier.Value,0,awakeningEnergy:GetAttribute("MaxEnergy"))
+								end
+							end
+						end
+					end
+					if not attacked then
+						charValues.Stunned.Value = true
+						local currentStun = manyMisc:UpdateCount(charValues.Stunned)
+						task.delay(0.5,function()
+							if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+								charValues.CanAttack.Value = true
+							end
+							task.wait(0.5)
+							if currentStun == manyMisc:GetCount(charValues.Stunned) then
+								charValues.Stunned.Value = false
+							end
+						end)
+					else
+						if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+							charValues.CanAttack.Value = true
+						end
+					end
+					if anims.Combo4.IsPlaying then
+						anims.Combo4.Stopped:Wait()
+					end
+				else
+					stopAllAnims(0.1)
+				end
+			end
+			if not stunHandler(0.5,charValues.Stunned) then
+				--dont ask
+			end
+			charValues.CanJump.Value = true
+			--MouseMelee1()
+		end
+	--[[elseif actions.HoldingM1 then
+		actions.HoldingM1 = false]]
+	end
+end
+
+function isRunning()
+	if charValues.Stunned.Value or charValues.Ragdolled.Value then charValues.Running.Value = false return end
+	--[[if (hum.WalkSpeed == charValues.RunSpeed.Value or hum.WalkSpeed == charValues.WalkSpeed.Value) and charValues.CanRun.Value then
+		if hum.WalkSpeed == charValues.WalkSpeed.Value and not charValues.Running.Value then
+			charValues.Running.Value = true
+			hum.WalkSpeed = charValues.RunSpeed.Value
+		elseif hum.WalkSpeed == charValues.WalkSpeed.Value and not charValues.Running.Value then
+			charValues.Running.Value = false
+			hum.WalkSpeed = charValues.WalkSpeed.Value
+		end 
+	elseif charValues.Running.Value then
+		charValues.Running.Value = false
+	end]]
+	
+	if actions.Running and charValues.CanRun.Value and not charValues.Running.Value and not (hum.WalkSpeed ~= charValues.RunSpeed.Value and hum.WalkSpeed ~= charValues.WalkSpeed.Value) then
+		charValues.Running.Value = true
+		if hum.WalkSpeed == charValues.WalkSpeed.Value then
+			hum.WalkSpeed = charValues.RunSpeed.Value
+		end
+	elseif (not actions.Running or not charValues.CanRun.Value or (hum.WalkSpeed ~= charValues.RunSpeed.Value and hum.WalkSpeed ~= charValues.WalkSpeed.Value)) and charValues.Running.Value then
+		charValues.Running.Value = false
+		if hum.WalkSpeed == charValues.RunSpeed.Value then
+			hum.WalkSpeed = charValues.WalkSpeed.Value
+		end
+	end
+end
+
+_Event.OnServerEvent:Connect(function(_player,_action,data)
+	local success,result = pcall(function()
+		if _player ~= player then
+			warn("what the hell how are you connecting to other shinra script :eyebrow:")
+			--suspicious
+		end
+	end)
+	if not actions.PlayerLoaded then return end
+	if _action == "M1" then
+		local isHoldingM1 = table.unpack(data)
+		actions.HoldingM1 = isHoldingM1
+		MouseMelee1()
+	elseif _action == "Running" then
+		local IsRunning = table.unpack(data)
+		actions.Running = IsRunning
+		isRunning()
+	end
+	if charValues.Ragdolled.Value or charValues.Stunned.Value then return end
+	if _action == "Awaken" then
+		awakeningTrigger:Fire(player,false)
+	end
+	if _action == "Block" and (charValues.CanAttack.Value or actions.isBlocking) then
+		local isBlocking = table.unpack(data)
+		local function Unblock()
+			if not Destroyed(actions.isBlocking) then
+				connections["gotStunned"..blockCount]:Disconnect()
+				connections["gotGuardBreak"..blockCount]:Disconnect()
+				hum.WalkSpeed = charValues.WalkSpeed.Value
+				charValues.CanJump.Value = true
+				pcall(function()
+					local Blocking = actions.isBlocking
+					if Blocking and not Destroyed(Blocking) then
+						Blocking:Destroy()
+					end
+				end)
+				actions.isBlocking = nil
+				anims.Blocking:Stop()
+				charValues.CanAttack.Value = true
+				return true
+			end
+			return
+		end
+		if isBlocking and canBlock.Value and not actions.isBlocking then
+			charValues.CanAttack.Value = false
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			hum.WalkSpeed = charValues.WalkSpeed.Value/1.75
+			charValues.CanJump.Value = false
+			local Blocking = Instance.new("BoolValue") do
+				Blocking.Value = true
+				Blocking.Name = "Blocking"
+				Blocking.Parent = char
+			end
+			actions.isBlocking = Blocking
+			local block_sfx = SoundEffects.Block:Clone() do
+				block_sfx.Parent = hrp
+				block_sfx.PlaybackSpeed = rng:NextNumber(1.7,1.8)
+				block_sfx:Play()
+				game.Debris:AddItem(block_sfx,block_sfx.TimeLength/block_sfx.PlaybackSpeed)
+			end
+			
+			blockCount = (blockCount+1)%1000
+			
+			local gotStunned,gotBlockremoved
+			connections["gotStunned"..blockCount] = charValues.Stunned.Changed:Connect(function()
+				if charValues.Stunned.Value then
+					Unblock()
+				end
+			end)
+			
+			connections["gotGuardBreak"..blockCount]  = Blocking.Destroying:Connect(function()
+				Unblock()
+			end)
+			
+			anims.Blocking:Play()
+		else
+			Unblock()
+		end
+	end
+end)
+
+awakeningTrigger.Event:Connect(function(plr,triggerOverride)
+	if plr ~= player then return end
+	if (awakeningEnergy.Value >= awakeningEnergy:GetAttribute("MaxEnergy") or triggerOverride) and (not charValues.Stunned:GetAttribute("ReallyStunned") and charValues.CanAttack.Value and charValues.CanUseAbillities.Value) then
+		awakeningEnergy.Value = 0
+		hum.Health = hum.MaxHealth
+		
+		local currentAttack = manyMisc:UpdateCount(charValues.CanAttack)
+		charValues.CanAttack.Value = false
+		
+		local currentUseAbillities = manyMisc:UpdateCount(charValues.CanUseAbillities)
+		charValues.CanUseAbillities.Value = false
+		
+		local currentMove = manyMisc:UpdateCount(charValues.CanMove)
+		charValues.CanMove.Value = false
+		
+		local currentIFrames = manyMisc:UpdateCount(charValues.IFrames)
+		charValues.IFrames.Value = 3
+		
+		local currentCanRotateTorso = manyMisc:UpdateCount(charValues.CanRotateTorso)
+		charValues.CanRotateTorso.Value = true
+		
+		manyMisc:removeAllBodyMovers(char,true,true)
+		
+		stopAllAnims(0.2,hum)
+		anims.Awaken:Play(0.2)
+		anims.Awaken:AdjustSpeed(1.25)
+		
+		local awakeningValue = Instance.new("NumberValue") do
+			awakeningValue.Name = "Awakened"
+			awakeningValue.Parent = charValues
+			
+			--[[ EffectValue legend:
+			
+			[0] -- Effect In (1)
+			[0] -- Effect Out (1)
+			
+			[Destroy] = Stop the effect
+			]]
+		end
+		
+		Effects(true,"ShinraAwakening",{player,awakeningValue})
+		anims.Awaken:GetMarkerReachedSignal("Freeze"):Wait()
+		anims.Awaken:AdjustSpeed(0)
+		anims.Awaken.TimePosition = 2
+		task.wait(2)
+		awakeningValue.Value = 1
+		anims.Awaken:AdjustSpeed(1.25)
+		anims.Awaken.TimePosition = 2.2
+		if anims.Awaken.IsPlaying then
+			anims.Awaken.Stopped:wait()
+		end
+		task.wait(0.5)
+		awakeningValue:Destroy()
+		if currentAttack == manyMisc:GetCount(charValues.CanAttack) then
+			charValues.CanAttack.Value = true
+		end
+		
+		if currentUseAbillities == manyMisc:GetCount(charValues.CanUseAbillities) then
+			charValues.CanUseAbillities.Value = true
+		end
+		
+		if currentMove == manyMisc:GetCount(charValues.CanMove) then
+			charValues.CanMove.Value = true
+		end
+		
+		--[[if currentCanRotateTorso == manyMisc:GetCount(charValues.CanRotateTorso) then
+			charValues.CanRotateTorso.Value = true
+		end]]
+		
+		task.delay(1,function()
+			if currentIFrames == manyMisc:GetCount(charValues.IFrames) then
+				charValues.IFrames.Value = 0
+			end
+		end)
+	end
+end)
+
+_Function.OnServerInvoke = function(_player,_action,data)
+	local success,result = pcall(function()
+		if _player ~= player then
+			warn("what the hell how are you connecting to other shinra script :eyebrow:")
+		end
+	end)
+	if _action == "Dash" and data[1] and not charValues.Stunned:GetAttribute("ReallyStunned") and charValues.CanUseAbillities.Value and not actions.Dashing and hum.Health > 0 then
+		local direction = table.unpack(data)
+		if direction == "Front" and not getDebounce("MajorDash") then
+			charValues.LastTimeAttacked.Value = tick()
+			actions.Dashing = true
+			charValues.CanUseAbillities.Value = false
+			charValues.CanAttack.Value = false
+			charValues.Dashing.Front.Value = true
+			local majorDashDebounce = newDebounce("MajorDash",5)
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			charValues.CanJump.Value = false
+
+			charValues.CanRun.Value = false
+			local currentRun = manyMisc:UpdateCount(charValues.CanRun)
+
+			hum.WalkSpeed = 0
+
+			local dashRemote = Instance.new("RemoteEvent") do
+				dashRemote.Name = "DashRemote"
+				dashRemote.Parent = replicatedRemotes
+			end
+			Effects(true,"ShinraDash",{player,char,direction,false--[[fire burst buff]],dashRemote})
+			stopAllAnims(0.1)
+			anims.FrontDash:Play(0.1)
+			anims.FrontDash:AdjustSpeed(0.3)
+			anims.FrontDash.TimePosition = 0
+
+			local dashEvent
+
+			local function endDash(endCF,endTime,canAttack)
+				dashEvent:Disconnect()
+				dashRemote:Destroy()
+				anims.FrontDash.TimePosition = .30
+				anims.FrontDash:AdjustSpeed(1)
+				charValues.Dashing.Front.Value = false
+
+				if not charValues.Stunned.Value and canAttack then
+					local ImpactHitbox = Instance.new("Part") do
+						local front = 9
+						local back = 2
+						ImpactHitbox.Material = Enum.Material.SmoothPlastic
+						ImpactHitbox.Color = Color3.fromRGB(255,0,0)
+						ImpactHitbox.CollisionGroup = "Hitbox"
+						ImpactHitbox.Size = Vector3.new(5,4,front+back)
+						ImpactHitbox.CFrame = endCF * CFrame.new(0,0,-front/2+back/2) 
+						ImpactHitbox.Anchored = true
+						ImpactHitbox.CanCollide = false
+						ImpactHitbox.Transparency = _debuggingHitbox and 0.8 or 1
+						ImpactHitbox.Parent = workspace.Terrain
+						game.Debris:AddItem(ImpactHitbox,_debuggingHitbox and 3 or 0)
+					end
+
+					local LandingParams = OverlapParams.new()
+					LandingParams.CollisionGroup = "Hitbox"
+					LandingParams.FilterType = Enum.RaycastFilterType.Exclude
+					LandingParams.FilterDescendantsInstances = {char}
+
+					local alreadyHit = {}
+					local attacked = false 
+					local Impact = workspace:GetPartsInPart(ImpactHitbox,LandingParams)
+					for i,part in Impact do
+						if part.Parent:FindFirstChild("Humanoid") and part.Parent:FindFirstChild("Values") then
+							local tchar = part.Parent
+							local tcharValues = tchar:FindFirstChild("Values")
+							local thum = tchar:WaitForChild("Humanoid")
+							local thrp = tchar:WaitForChild("HumanoidRootPart")
+							local possibleDebounce = tchar:FindFirstChild("Debounces") and tchar.Debounces:FindFirstChild("M1")
+							if (possibleDebounce and timeDifference(possibleDebounce.Value,majorDashDebounce.Value)) or tcharValues:FindFirstChild("SpawnProtection") or table.find(alreadyHit,tchar) or thum.Health <= 0 or (tcharValues:FindFirstChild("IFrames") and tcharValues.IFrames.Value > 1) or (tcharValues:FindFirstChild("Ragdolled") and tcharValues.Ragdolled.Value) then continue end
+							table.insert(alreadyHit,tchar)
+
+							if endTime >= 0 then
+								local directionDot = thrp.CFrame.LookVector:Dot(CFrame.new(endCF.Position,thrp.Position).LookVector)
+								tcharValues.LastWhoAttacked.Value = player
+								tcharValues.LastWhoAttacked:SetAttribute("Updated",tick())
+
+								if tchar:FindFirstChild("Blocking") and directionDot <= 0.5 then
+									local blocked_sfx = SoundEffects.BlockHit:Clone() do
+										blocked_sfx.Parent = thrp
+										blocked_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+										blocked_sfx:Play()
+										game.Debris:AddItem(blocked_sfx,blocked_sfx.TimeLength/blocked_sfx.PlaybackSpeed)
+									end
+									charValues.Stunned.Value = true
+									local currentStun = manyMisc:UpdateCount(charValues.Stunned)
+									task.delay(0.5,function()
+										if currentStun == manyMisc:GetCount(charValues.Stunned) then
+											charValues.Stunned.Value = false
+										end
+									end)
+								else
+									if tchar:FindFirstChild("Blocking") then
+										tchar:FindFirstChild("Blocking"):Destroy()
+									end
+
+									local knockRange = 1
+
+									if tcharValues.Stunned:GetAttribute("CanStun") then
+										tcharValues.Stunned.Value = true
+										local currentStun = manyMisc:UpdateCount(tcharValues.Stunned)
+										task.delay(1,function()
+											if currentStun == manyMisc:GetCount(tcharValues.Stunned) then
+												tcharValues.Stunned.Value = false
+											end
+										end)
+									end
+
+									manyMisc:removeAllBodyMovers(tchar,true,true)
+
+									local tknockback = Instance.new("BodyPosition") do
+										tknockback.P = 5000
+										tknockback.D = 400
+										tknockback.MaxForce = Vector3.new(1,0,1) * 15000
+										tknockback.Parent = thrp
+										tknockback.Position = (CFrame.new(thrp.Position,endCF.Position) * CFrame.new(0,0,knockRange*2)).Position
+									end
+
+									thum.Health = math.clamp(thum.Health-3.5,0,thum.MaxHealth)
+									local hitAnim = thum:LoadAnimation(plrAnimFolder.Hits:GetChildren()[math.random(1,#plrAnimFolder.Hits:GetChildren())])
+									hitAnim:Play(0.1)
+
+									local hit_FX = VFX.Shinra.FrontDashImpact:Clone() do
+										hit_FX.Parent = workspace.Terrain
+										hit_FX.CFrame = CFrame.new(thrp.Position--[[*Vector3.new(1,0,1)+Vector3.new(0,endCF.Position.Y,0)]],endCF.Position)
+										hit_FX.Attachment.Blast:Emit(2)
+										hit_FX.Attachment.BlastWorldUp:Emit(1)
+										hit_FX.Attachment.Lines:Emit(math.random(5,15))
+										hit_FX.Attachment.SmoothLines:Emit(math.random(15,30))
+										game.Debris:AddItem(hit_FX,1)
+									end
+									if not attacked then
+										attacked = true
+										local pknockback = tknockback:Clone() do
+											pknockback.Parent = hrp
+											pknockback.Position = (CFrame.new(endCF.Position,thrp.Position) * CFrame.new(0,0,-knockRange*2)).Position
+											game.Debris:AddItem(pknockback,0.1)
+										end
+										local hit_sfx = SoundEffects.Hit:Clone() do
+											hit_sfx.Parent = thrp
+											hit_sfx.PlaybackSpeed = rng:NextNumber(0.9,1.1)
+											hit_sfx:Play()
+											game.Debris:AddItem(hit_sfx,hit_sfx.TimeLength/hit_sfx.PlaybackSpeed)
+										end
+									end
+									game.Debris:AddItem(tknockback,0.1)
+								end
+							end
+						end
+					end
+				end
+				print(canAttack)
+				if not charValues.Stunned.Value and canAttack then
+					if anims.FrontDash.IsPlaying then
+						anims.FrontDash.Stopped:Wait()
+					end
+			
+					
+				end
+				hum.WalkSpeed = charValues.WalkSpeed.Value
+				task.delay(0.25,function()
+					if currentJump == manyMisc:GetCount(charValues.CanJump) then
+						charValues.CanJump.Value = true
+					end
+				end)
+				if currentRun == manyMisc:GetCount(charValues.CanRun) then
+					charValues.CanRun.Value = true
+				end
+				charValues.CanUseAbillities.Value = true
+				charValues.CanAttack.Value = true
+				actions.Dashing = false
+			end
+
+			dashEvent = dashRemote.OnServerEvent:Connect(function(d_player,d_action,d_data)
+				if d_player == player then
+					if d_action == "End" then
+						if d_data then
+							endDash(d_data[1],d_data[2],d_data[3])
+						else
+							endDash()
+						end
+					end
+				end
+			end)
+			return true,dashRemote
+		elseif direction == "Back" and not getDebounce("MajorDash") then
+			actions.Dashing = true
+			charValues.CanUseAbillities.Value = false
+			charValues.Dashing.Back.Value = true
+			charValues.CanAttack.Value = false
+			local sideDashDebounce = newDebounce("MajorDash",5)
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			charValues.CanJump.Value = false
+			local dashRemote = Instance.new("RemoteEvent") do
+				dashRemote.Name = "DashRemote"
+				dashRemote.Parent = replicatedRemotes
+			end
+			Effects(true,"ShinraDash",{player,char,direction,false--[[fire burst buff]],dashRemote})
+			stopAllAnims(0.1)
+			anims.BackDash:Play(0.1)
+
+			local dashEvent
+
+			local function endDash()
+				dashEvent:Disconnect()
+				dashRemote:Destroy()
+				charValues.Dashing.Back.Value = false
+				actions.Dashing = false
+				task.delay(0.25,function()
+					if currentJump == manyMisc:GetCount(charValues.CanJump) then
+						charValues.CanJump.Value = true
+					end
+				end)
+				if not charValues.Stunned.Value then
+					if anims.FrontDash.IsPlaying then
+						anims.FrontDash.Stopped:Wait()
+					end
+				else
+					stopAllAnims(0.1)
+				end
+				charValues.CanUseAbillities.Value = true
+				charValues.CanAttack.Value = true
+				actions.Dashing = false
+			end
+
+			dashEvent = dashRemote.OnServerEvent:Connect(function(d_player,d_action,d_data)
+				if d_player == player then
+					if d_action == "End" then
+						endDash()
+					end
+				end
+			end)
+			return true,dashRemote
+		elseif direction == "Left" and not getDebounce("SideDash") then
+			actions.Dashing = true
+			charValues.Dashing.Left.Value = true
+			local sideDashDebounce = newDebounce("SideDash",2)
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			charValues.CanJump.Value = false
+			local dashRemote = Instance.new("RemoteEvent") do
+				dashRemote.Name = "DashRemote"
+				dashRemote.Parent = replicatedRemotes
+			end
+			Effects(true,"ShinraDash",{player,char,direction,false--[[fire burst buff]],dashRemote})
+			stopAllAnims(0.1)
+			anims.LeftDash:Play(0.1)
+
+			local dashEvent
+
+			local function endDash()
+				dashEvent:Disconnect()
+				dashRemote:Destroy()
+				charValues.Dashing.Left.Value = false
+				actions.Dashing = false
+				task.delay(0.25,function()
+					if currentJump == manyMisc:GetCount(charValues.CanJump) then
+						charValues.CanJump.Value = true
+					end
+				end)
+				if charValues.Stunned.Value then
+					stopAllAnims(0.1)
+				end
+			end
+
+			dashEvent = dashRemote.OnServerEvent:Connect(function(d_player,d_action,d_data)
+				if d_player == player then
+					if d_action == "End" then
+						endDash()
+					end
+				end
+			end)
+			return true,dashRemote
+		elseif direction == "Right" and not getDebounce("SideDash") then
+			actions.Dashing = true
+			charValues.Dashing.Right.Value = true
+			local sideDashDebounce = newDebounce("SideDash",2)
+			local currentJump = manyMisc:UpdateCount(charValues.CanJump)
+			charValues.CanJump.Value = false
+			local dashRemote = Instance.new("RemoteEvent") do
+				dashRemote.Name = "DashRemote"
+				dashRemote.Parent = replicatedRemotes
+			end
+			Effects(true,"ShinraDash",{player,char,direction,false--[[fire burst buff]],dashRemote})
+			stopAllAnims(0.1)
+			anims.RightDash:Play(0.1)
+
+			local dashEvent
+
+			local function endDash()
+				dashEvent:Disconnect()
+				dashRemote:Destroy()
+				charValues.Dashing.Right.Value = false
+				actions.Dashing = false
+				task.delay(0.25,function()
+					if currentJump == manyMisc:GetCount(charValues.CanJump) then
+						charValues.CanJump.Value = true
+					end
+				end)
+				if charValues.Stunned.Value then
+					stopAllAnims(0.1)
+				end
+			end
+
+			dashEvent = dashRemote.OnServerEvent:Connect(function(d_player,d_action,d_data)
+				if d_player == player then
+					if d_action == "End" then
+						endDash()
+					end
+				end
+			end)
+			return true,dashRemote
+		end
+		return
+	end
+end
+
+task.spawn(function()
+	while runService.Heartbeat:Wait() do
+		task.spawn(function() MouseMelee1() end)
+		task.spawn(function() isRunning() end)
+		runService.Heartbeat:Wait()
+		task.wait(rng:NextNumber(0.05,0.1))
+	end
+end)
+
+characterHandler:UpdateAbillities(player,"Shinra")
+
+actions.PlayerLoaded = true
