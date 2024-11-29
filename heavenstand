@@ -12,6 +12,7 @@ if game.PlaceId == 14561998168 then
        }
     })
 
+    -- Main Tab
     local MainTab = Window:CreateTab("Home", nil)
     local MainSection = MainTab:CreateSection("Main")
 
@@ -122,6 +123,58 @@ if game.PlaceId == 14561998168 then
           print("Teleported to Storage.")
        end,
     })
+
+    -- Updated Gacha button to teleport to Hakari NPC
+    local Button3 = TPTab:CreateButton({
+       Name = "Hakari",
+       Callback = function()
+          -- Teleport to Hakari NPC's HumanoidRootPart
+          local hakariNPC = workspace.Map.NPCs.Hakari
+          if hakariNPC and hakariNPC:FindFirstChild("HumanoidRootPart") then
+              game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = hakariNPC.HumanoidRootPart.CFrame
+              print("Teleported to Hakari.")
+          else
+              print("Hakari NPC not found.")
+          end
+       end,
+    })
+
+    -- Extra Tab for Infinite Yield and Dex
+    local ExtraTab = Window:CreateTab("Extra", nil)
+    local ExtraSection = ExtraTab:CreateSection("Scripts")
+
+    -- Button for Infinite Yield
+    local Button4 = ExtraTab:CreateButton({
+       Name = "Infinite Yield",
+       Callback = function()
+          loadstring(game:HttpGet('https://raw.githubusercontent.com/peakth/script/refs/heads/main/Infinite%20Yield'))()
+          print("Infinite Yield script executed.")
+       end,
+    })
+
+    -- Button for Dex
+    local Button5 = ExtraTab:CreateButton({
+       Name = "Dex",
+       Callback = function()
+          loadstring(game:HttpGet('https://raw.githubusercontent.com/peakth/script/refs/heads/main/dex'))()
+          print("Dex script executed.")
+       end,
+    })
+
+    -- Reinitialize auto-farm after respawn
+    game.Players.LocalPlayer.CharacterAdded:Connect(function()
+        print("Character respawned. Reinitializing Auto Farm.")
+        -- Reinitialize the character and humanoid root part after respawn
+        local player = game.Players.LocalPlayer
+        local character = player.Character or player.CharacterAdded:Wait()
+        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+        
+        -- Restart the auto-farm loop if it's still active
+        if isLooping then
+            print("Restarting Auto Farm loop after respawn.")
+            coroutine.wrap(startAutoFarm)()  -- Restart the auto-farm loop
+        end
+    end)
 else
     print("This script is not for this game.")
 end
