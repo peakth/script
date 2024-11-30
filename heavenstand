@@ -1,180 +1,208 @@
-if game.PlaceId == 14561998168 then
-    local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
-    local Window = Rayfield:CreateWindow({
-       Name = "best script ever",
-       LoadingTitle = "testing bro",
-       LoadingSubtitle = "by คนหล่อ",
-       ConfigurationSaving = {
-          Enabled = false,
-          FolderName = nil,
-          FileName = "Peak hub"
-       }
+-- Create main window using Fluent UI
+local Window = Fluent:CreateWindow({
+    Title = "Heaven stand!",
+    SubTitle = "by คนหล่อ",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = false,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+-- Add Tabs to the window
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "keyboard" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+local Options = Fluent.Options
+
+-- Function to show a notification
+local function showNotification(title, content)
+    Fluent:Notify({
+        Title = title,
+        Content = content,
+        Duration = 5
     })
+end
 
-    -- Main Tab
-    local MainTab = Window:CreateTab("Home", nil)
-    local MainSection = MainTab:CreateSection("Main")
+-- Function to teleport player to a given NPC or BasePart
+local function teleportPlayerToNode(selectedNode)
+    local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end  -- If HumanoidRootPart is missing, return
 
-    Rayfield:Notify({
-       Title = "Executed the Script",
-       Content = "Very cool GUI",
-       Duration = 5,
-       Image = nil,
-       Actions = {
-          Ignore = {
-             Name = "Okay!",
-             Callback = function()
-                print("The user tapped Okay!")
-             end
-          }
-       },
-    })
-
-    local isLooping = false -- Variable to manage loop state
-
-    local function startAutoFarm()
-        local Players = game:GetService("Players")
-        local player = Players.LocalPlayer
-        local character = player.Character or player.CharacterAdded:Wait()
-        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-
-        local spawnPointsBox = workspace.Map.spawnPoints.Box
-        local baseParts = {}
-
-        local function updateBaseParts()
-            baseParts = {}
-            for _, child in ipairs(spawnPointsBox:GetChildren()) do
-                if child:FindFirstChild("Box") and child.Box:FindFirstChild("Base") then
-                    table.insert(baseParts, child.Box.Base)
+    -- If we find the selected node, teleport
+    if selectedNode then
+        local obj = selectedNode.Obj
+        if obj:IsA("Model") then
+            -- Check if the model has a PrimaryPart
+            if obj.PrimaryPart then
+                hrp.CFrame = obj.PrimaryPart.CFrame
+            else
+                -- If no PrimaryPart, check for a BasePart
+                local basePart = obj:FindFirstChildWhichIsA("BasePart", true)
+                if basePart then
+                    hrp.CFrame = basePart.CFrame
                 end
             end
+        elseif obj:IsA("BasePart") then
+            -- If it's just a BasePart, teleport to it directly
+            hrp.CFrame = obj.CFrame
         end
-
-        local function waitForBaseParts()
-            print("Waiting for Base parts to respawn...")
-            while #baseParts == 0 and isLooping do
-                task.wait(1)
-                updateBaseParts()
-            end
-            if #baseParts > 0 then
-                print("Base parts respawned.")
-            end
-        end
-
-        while isLooping do
-            updateBaseParts()
-
-            if #baseParts == 0 then
-                waitForBaseParts()
-            end
-
-            for _, base in ipairs(baseParts) do
-                if not isLooping then break end
-
-                humanoidRootPart.CFrame = base.CFrame
-                print("Teleported to:", base.Name)
-
-                task.wait(0.2)
-                game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                task.wait(0.1)
-                game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.E, false, game)
-
-                task.wait(1)
-            end
-
-            task.wait(0.1)
-        end
-
-        print("Auto farm loop ended.")
     end
-
-    local Toggle = MainTab:CreateToggle({
-       Name = "Auto Farm Box Heaven Stand",
-       CurrentValue = false,
-       Flag = "Toggle1",
-       Callback = function(Value)
-          isLooping = Value -- Set loop state based on toggle
-          if isLooping then
-             print("Auto Farm Box Heaven Stand activated.")
-             coroutine.wrap(startAutoFarm)() -- Run the auto farm loop in a separate thread
-          else
-             print("Auto Farm Box Heaven Stand deactivated.")
-          end
-       end,
-    })
-
-    local TPTab = Window:CreateTab("Teleports", nil)
-
-    local Button1 = TPTab:CreateButton({
-       Name = "Item Seller",
-       Callback = function()
-          game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame =
-             workspace.Map.NPCs.AMM_Devs.HumanoidRootPart.CFrame
-          print("Teleported to Item Seller.")
-       end,
-    })
-
-    local Button2 = TPTab:CreateButton({
-       Name = "Storage",
-       Callback = function()
-          game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame =
-             workspace.Map.NPCs.Hat_Kidc.HumanoidRootPart.CFrame
-          print("Teleported to Storage.")
-       end,
-    })
-
-    -- Updated Gacha button to teleport to Hakari NPC
-    local Button3 = TPTab:CreateButton({
-       Name = "Hakari",
-       Callback = function()
-          -- Teleport to Hakari NPC's HumanoidRootPart
-          local hakariNPC = workspace.Map.NPCs.Hakari
-          if hakariNPC and hakariNPC:FindFirstChild("HumanoidRootPart") then
-              game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = hakariNPC.HumanoidRootPart.CFrame
-              print("Teleported to Hakari.")
-          else
-              print("Hakari NPC not found.")
-          end
-       end,
-    })
-
-    -- Extra Tab for Infinite Yield and Dex
-    local ExtraTab = Window:CreateTab("Extra", nil)
-    local ExtraSection = ExtraTab:CreateSection("Scripts")
-
-    -- Button for Infinite Yield
-    local Button4 = ExtraTab:CreateButton({
-       Name = "Infinite Yield",
-       Callback = function()
-          loadstring(game:HttpGet('https://raw.githubusercontent.com/peakth/script/refs/heads/main/Infinite%20Yield'))()
-          print("Infinite Yield script executed.")
-       end,
-    })
-
-    -- Button for Dex
-    local Button5 = ExtraTab:CreateButton({
-       Name = "Dex",
-       Callback = function()
-          loadstring(game:HttpGet('https://raw.githubusercontent.com/peakth/script/refs/heads/main/dex'))()
-          print("Dex script executed.")
-       end,
-    })
-
-    -- Reinitialize auto-farm after respawn
-    game.Players.LocalPlayer.CharacterAdded:Connect(function()
-        print("Character respawned. Reinitializing Auto Farm.")
-        -- Reinitialize the character and humanoid root part after respawn
-        local player = game.Players.LocalPlayer
-        local character = player.Character or player.CharacterAdded:Wait()
-        local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-        
-        -- Restart the auto-farm loop if it's still active
-        if isLooping then
-            print("Restarting Auto Farm loop after respawn.")
-            coroutine.wrap(startAutoFarm)()  -- Restart the auto-farm loop
-        end
-    end)
-else
-    print("This script is not for this game.")
 end
+
+-- Dropdown for NPC selection
+local npcList = {}  -- List for dropdown
+local npcPaths = {}  -- Store paths to NPC models
+
+-- Rename NPCs to avoid conflicts and populate NPC dropdown
+for _, npc in pairs(workspace.Map.NPCs:GetChildren()) do
+    if npc:IsA("Model") then
+        local renamedNpc = npc.Name
+        local count = 1
+        -- Check if the name already exists, if so, rename it
+        while table.find(npcList, renamedNpc) do
+            renamedNpc = npc.Name .. count
+            count = count + 1
+        end
+        npc.Name = renamedNpc  -- Rename NPC to avoid duplicates
+        table.insert(npcList, renamedNpc)
+        table.insert(npcPaths, npc)  -- Store the model itself
+    end
+end
+
+-- Add Dropdown to the "Main" Tab
+local Dropdown = Tabs.Main:AddDropdown("NpcDropdown", {
+    Title = "Select NPC",
+    Values = npcList,
+    Multi = false,
+    Default = 1
+})
+
+Dropdown:SetValue(npcList[1])
+
+-- Teleport Button
+Tabs.Main:AddButton({
+    Title = "Teleport to NPC",
+    Description = "Teleport to the selected NPC",
+    Callback = function()
+        local selectedNpcName = Dropdown.Value
+        for i, npcName in ipairs(npcList) do
+            if npcName == selectedNpcName then
+                local selectedNpc = npcPaths[i]  -- Get the actual model reference
+                if selectedNpc then
+                    -- Teleport to the selected NPC
+                    teleportPlayerToNode({ Obj = selectedNpc })
+                    showNotification("Teleported", "Teleported to " .. selectedNpc.Name)
+                end
+                break
+            end
+        end
+    end
+})
+
+-- Auto Farm Variables
+local spawnWaitingSpot = CFrame.new(-5, 806, 428)  -- Spawn waiting spot position
+local isAutoFarming = false
+local running = false
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local baseParts = {}
+
+-- Update base parts list
+local function updateBaseParts()
+    baseParts = {}
+    local spawnPointsBox = workspace.Map.spawnPoints.Box
+    for _, child in ipairs(spawnPointsBox:GetChildren()) do
+        if child:FindFirstChild("Box") and child.Box:FindFirstChild("Base") then
+            table.insert(baseParts, child.Box.Base)
+        end
+    end
+end
+
+-- Wait for base parts to spawn
+local function waitForBaseParts()
+    -- Teleport to the spawn waiting spot when the "waiting" message is printed
+    game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = spawnWaitingSpot
+    showNotification("Teleported", "Teleported to spawn waiting spot.")
+
+    while #baseParts == 0 and isAutoFarming do
+        task.wait(1)
+        updateBaseParts()
+    end
+    if #baseParts > 0 then
+        print("Base parts respawned.")
+        showNotification("Box Spawned", "Box parts have respawned.")
+    else
+        print("No box parts found. Teleporting to spawn waiting spot.")
+        -- Teleport to the spawn waiting spot if no box parts found
+        game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = spawnWaitingSpot
+        showNotification("Teleported", "Teleported to spawn waiting spot.")
+    end
+end
+
+-- Start auto farm loop
+local function startAutoFarm()
+    while isAutoFarming do
+        updateBaseParts()
+
+        if #baseParts == 0 then
+            waitForBaseParts()
+        end
+
+        for _, base in ipairs(baseParts) do
+            if not isAutoFarming then break end
+            humanoidRootPart.CFrame = base.CFrame
+            print("Teleported to:", base.Name)
+
+            task.wait(0.2)
+            game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.1)
+            game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.E, false, game)
+
+            task.wait(1)
+        end
+
+        task.wait(0.1)
+    end
+    print("Auto farm loop ended.")
+    running = false
+end
+
+-- Add Toggle for Auto Farm
+local Toggle = Tabs.Main:AddToggle("Auto Farm Box Heaven Stand", {
+    Title = "Auto Farm",
+    Default = false,
+    Callback = function(state)
+        isAutoFarming = state
+        if isAutoFarming and not running then
+            print("Auto Farm activated.")
+            running = true
+            coroutine.wrap(startAutoFarm)()
+        elseif not isAutoFarming then
+            print("Auto Farm deactivated.")
+        end
+    end
+})
+
+-- Add Interface Manager to Settings Tab
+-- Hand the library over to InterfaceManager
+InterfaceManager:SetLibrary(Fluent)
+InterfaceManager:SetFolder("FluentScriptHub")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+
+-- Initialize the window and tabs
+Window:SelectTab(1)
+
+-- Final notification
+Fluent:Notify({
+    Title = "Cool",
+    Content = "The script has been loaded.",
+    Duration = 8
+})
