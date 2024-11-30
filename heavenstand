@@ -10,7 +10,7 @@ local Window = Fluent:CreateWindow({
     Size = UDim2.fromOffset(580, 460),
     Acrylic = false,
     Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
+    MinimizeKey = Enum.KeyCode.K
 })
 
 -- Add Tabs to the window
@@ -177,7 +177,7 @@ end
 
 -- Add Toggle for Auto Farm
 local Toggle = Tabs.Main:AddToggle("Auto Farm Box Heaven Stand", {
-    Title = "Auto Farm",
+    Title = "Auto farm box",
     Default = false,
     Callback = function(state)
         isAutoFarming = state
